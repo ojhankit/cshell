@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <fcntl.h>   // for O_WRONLY, O_CREAT, O_TRUNC, O_APPEND
 
+char cwd[1024];
 // Function to parse input into args array
 void parse_input(char *input, char **args) {
     int i = 0;
@@ -20,7 +21,13 @@ void parse_input(char *input, char **args) {
 
 // Signal handler for Ctrl+C
 void handler_function(int sig) {
-    printf("\n");
+    //printf("\n");
+    if (getcwd(cwd, sizeof(cwd)) != NULL) {
+            printf("\n%s> ", cwd);
+    }else {
+        perror("getcwd() error");
+        printf("\nmyshell> ");
+    }
     fflush(stdout);
 }
 
@@ -29,7 +36,6 @@ int main(int argc, char const *argv[]) {
 
     while (1) {
         // Print current working directory as prompt
-        char cwd[1024];
         if (getcwd(cwd, sizeof(cwd)) != NULL) {
             printf("%s> ", cwd);
         } else {
@@ -68,35 +74,112 @@ int main(int argc, char const *argv[]) {
             }
             continue; // skip fork for cd
         }
+        // pipe cmd handling
+        int has_pipe = 0;
+        int pipe_index = -1;
+        for(int i=0;args[i] != NULL; i++){
+            if(strcmp(args[i],"|") == 0){
+                has_pipe = 1;
+                pipe_index = i;
+                break;
+            }
+        }
 
+        if(has_pipe){
+            args[pipe_index] = NULL; // terminate first cmd
+            char *left_args[64];
+            char *right_args[64];
+
+            // left cmd
+            for(int i=0;i<pipe_index;i++){
+                left_args[i] = args[i];
+            }
+            left_args[pipe_index] = NULL;
+            // right cmd
+            int j=0;
+            for(int i=pipe_index+1;args[i]!=NULL;i++){
+                right_args[j++] = args[i];
+            }
+            right_args[j] = NULL;
+
+            int fd[2];
+            if (pipe(fd) == -1){
+                perror("pipe failed");
+                continue;
+            }
+
+            pid_t pid1 = fork();
+            if(pid1 == 0){
+                // left cmd
+                dup2(fd[1], STDOUT_FILENO);
+                close(fd[0]);
+                close(fd[1]);
+                execvp(left_args[0],left_args);
+                perror("left exec failed");
+                exit(1);
+            }
+
+            pid_t pid2 = fork();
+            if(pid2 == 0){
+                dup2(fd[0], STDIN_FILENO);
+                close(fd[0]);
+                close(fd[1]);
+                execvp(right_args[0], right_args);
+                perror("exec right failed");
+                exit(1);
+            }
+
+            close(fd[0]);
+            close(fd[1]);
+            waitpid(pid1, NULL, 0);
+            waitpid(pid2, NULL, 0);
+        }
         // Fork child process
         pid_t pid = fork();
         if (pid == 0) {
             // Child process
-
             // Check for output redirection
             int output_redirect = 0, append = 0, input_redirect = 0;
             char *outfile = NULL;
             char *infile = NULL;
+
             for (int i = 0; args[i] != NULL; i++) {
                 if (strcmp(args[i], ">") == 0) {
                     output_redirect = 1;
                     append = 0;
+                    if(args[i+1]==NULL){
+                        perror("Syntax error");
+                        exit(1);
+                    }
                     outfile = args[i + 1];
                     args[i] = NULL;
-                    break;
+                    args[i+1] = NULL;
+                    i++;
+                    //break;
                 } else if (strcmp(args[i], ">>") == 0) {
                     output_redirect = 1;
                     append = 1;
+                    if(args[i+1] == NULL){
+                        perror("Syntax error");
+                        exit(1);
+                    }
                     outfile = args[i + 1];
                     args[i] = NULL;
-                    break;
+                    args[i+1] = NULL;
+                    i++;
+                    //break;
                 }
                 else if (strcmp(args[i], "<") == 0){
                     input_redirect = 1;
+                    if(args[i+1] == NULL){
+                        perror("Syntax error");
+                        exit(1);
+                    }
                     infile = args[i+1];
                     args[i] = NULL;
-                    break;
+                    args[i+1] = NULL;
+                    i++;
+                    //break;
                 }
             }
 
