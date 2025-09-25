@@ -138,6 +138,9 @@ int main(int argc, char const *argv[]) {
         pid_t pid = fork();
         if (pid == 0) {
             // Child process
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTSTP, SIG_DFL);
+            signal(SIGQUIT, SIG_DFL);
             // Check for output redirection
             int output_redirect = 0, append = 0, input_redirect = 0;
             char *outfile = NULL;
